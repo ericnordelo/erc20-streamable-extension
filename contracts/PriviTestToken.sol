@@ -7,10 +7,12 @@ import "@openzeppelin/contracts/security/Pausable.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 
 contract PriviTestToken is ERC20, ERC20Burnable, Pausable, Ownable {
-    constructor() ERC20("PriviTestToken", "PTT") {
-        _mint(msg.sender, 10 * 10**decimals());
+    constructor(uint256 initialSupply) ERC20("PriviTestToken", "PTT") {
+        // default decimals: 18
+        _mint(msg.sender, initialSupply * 10**decimals());
     }
 
+    // Only owner can pause or unpause transfering
     function pause() public onlyOwner {
         _pause();
     }
@@ -19,10 +21,12 @@ contract PriviTestToken is ERC20, ERC20Burnable, Pausable, Ownable {
         _unpause();
     }
 
+    // allow to increment the totalSupply by minting
     function mint(address to, uint256 amount) public onlyOwner {
         _mint(to, amount);
     }
 
+    // Implementing the pausing mechanism through this hook
     function _beforeTokenTransfer(
         address from,
         address to,
