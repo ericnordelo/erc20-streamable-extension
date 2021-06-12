@@ -1,5 +1,6 @@
 # The utils
 utils/
 
-# The build jsons
 build/
+node_modules/
+
