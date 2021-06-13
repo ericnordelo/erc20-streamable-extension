@@ -1,30 +1,14 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
-import "@openzeppelin/contracts/security/Pausable.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "./ERC20Burnable.sol";
 import "./ERC20Streamable.sol";
 
-contract PriviTestToken is
-    ERC20_,
-    ERC20Burnable_,
-    ERC20Streamable,
-    Pausable,
-    Ownable
-{
+contract PriviTestToken is ERC20_, ERC20Burnable_, ERC20Streamable, Ownable {
     constructor(uint256 initialSupply) ERC20_("PriviTestToken", "PTT") {
         // default decimals: 18
         _mint(msg.sender, initialSupply * 10**decimals());
-    }
-
-    // Only owner can pause or unpause transfering
-    function pause() public onlyOwner {
-        _pause();
-    }
-
-    function unpause() public onlyOwner {
-        _unpause();
     }
 
     // allow to increment the totalSupply by minting
@@ -135,7 +119,7 @@ contract PriviTestToken is
         address from,
         address to,
         uint256 amount
-    ) internal override(ERC20Streamable, ERC20_) whenNotPaused {
+    ) internal override(ERC20Streamable, ERC20_) {
         ERC20Streamable._beforeTokenTransfer(from, to, amount);
     }
 }

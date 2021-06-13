@@ -1,25 +1,10 @@
 // SPDX-License-Identifier: MIT
-pragma solidity >=0.4.22 <0.9.0;
+pragma solidity ^0.8.0;
 
 import "./ERC20.sol";
+import "./HelperLibrary.sol";
 
 abstract contract ERC20Streamable is ERC20_ {
-    /*
-     * Notes:
-     * - `id` using senderAddress and receiverAddress as id.
-     * - `token` the token info is on the state variables _name and _symbol.
-     * - `type` using stype because type is a reserved word.
-     */
-    struct Streaming {
-        bytes32 stype;
-        address senderAddress;
-        address receiverAddress;
-        uint256 amount;
-        uint64 frequency;
-        uint64 startingDate;
-        uint64 endingDate;
-    }
-
     event StreamingCreated(address from, address to);
 
     /*
@@ -31,15 +16,15 @@ abstract contract ERC20Streamable is ERC20_ {
      * - at the same time (the for loop to update balance could be too expensive
      * - and run our of gas if the app is not designed carefully)
      */
-    mapping(address => Streaming[]) private _streamingsFromSender;
-    mapping(address => Streaming[]) private _streamingsToReceiver;
+    mapping(address => HelperLibrary.Streaming[]) private _streamingsFromSender;
+    mapping(address => HelperLibrary.Streaming[]) private _streamingsToReceiver;
 
     modifier hasStreamsOpenToAddress(
         uint256 _expectedCount,
         address _receiverAddress
     ) {
         // Use storage for less gas in readonly
-        Streaming[] storage senderStreamings =
+        HelperLibrary.Streaming[] storage senderStreamings =
             _streamingsFromSender[msg.sender];
         uint256 count = 0;
         for (uint256 i = 0; i < senderStreamings.length; i++) {
@@ -47,27 +32,40 @@ abstract contract ERC20Streamable is ERC20_ {
                 count++;
             }
         }
-        require(_expectedCount == count, "The expected count doesn't match'");
+        require(_expectedCount == count, "Incorrect number of open streamings");
         _;
     }
 
-    modifier validStreaming(Streaming memory _streaming) {
+    modifier validStreaming(HelperLibrary.Streaming memory _streaming) {
         require(
             keccak256(abi.encodePacked((_streaming.stype))) ==
                 keccak256(abi.encodePacked(("classic"))),
-            "Invalid type for the Streaming"
+            "Invalid type of open streamings"
         );
-        require(
-            _streaming.receiverAddress != address(0),
-            "Receiver address couldn't be the 0x0"
-        );
-        require(_streaming.amount > 0, "Amount should be greater than 1");
-        require(_streaming.frequency > 0, "Frequency should be greater than 1");
-        require(
-            _streaming.startingDate < _streaming.endingDate,
-            "The starting date should be before the ending date"
-        );
+        require(_streaming.receiverAddress != address(0));
+        require(_streaming.amount > 0);
+        require(_streaming.frequency > 0);
+        require(_streaming.startingDate < _streaming.endingDate);
         _;
+    }
+
+    // Getters for the Streamings
+    function getSenderStreamings(address _fromAddress)
+        public
+        view
+        virtual
+        returns (HelperLibrary.Streaming[] memory)
+    {
+        return _streamingsFromSender[_fromAddress];
+    }
+
+    function getReceiverStreamings(address _toAddress)
+        public
+        view
+        virtual
+        returns (HelperLibrary.Streaming[] memory)
+    {
+        return _streamingsToReceiver[_toAddress];
     }
 
     /*
@@ -77,24 +75,18 @@ abstract contract ERC20Streamable is ERC20_ {
      * - The sender can't create 2 streaming for the same receiver,
      * - in case this is needed he should update the existing one
      */
-    function createStreaming(Streaming memory _streaming)
+    function createStreaming(HelperLibrary.Streaming memory _streaming)
         external
         virtual
         hasStreamsOpenToAddress(0, _streaming.receiverAddress)
         validStreaming(_streaming)
     {
-        require(
-            _streaming.senderAddress == msg.sender,
-            "The senderAddress should match the transaction sender"
-        );
+        require(_streaming.senderAddress == msg.sender);
         // Only 5 streams open at the same time for a specific sender (to avoid out of gas in later transfers)
-        require(
-            _streamingsFromSender[_streaming.senderAddress].length <= 5,
-            "Only 5 streams open at the same time"
-        );
+        require(_streamingsFromSender[_streaming.senderAddress].length <= 5);
 
-        Streaming memory stream =
-            Streaming({
+        HelperLibrary.Streaming memory stream =
+            HelperLibrary.Streaming({
                 stype: _streaming.stype,
                 senderAddress: _streaming.senderAddress,
                 receiverAddress: _streaming.receiverAddress,
@@ -121,7 +113,7 @@ abstract contract ERC20Streamable is ERC20_ {
         );
     }
 
-    function updateStreaming(Streaming memory _streaming)
+    function updateStreaming(HelperLibrary.Streaming memory _streaming)
         public
         virtual
         hasStreamsOpenToAddress(1, _streaming.receiverAddress)
@@ -134,11 +126,11 @@ abstract contract ERC20Streamable is ERC20_ {
         _updateStreaming(_streaming);
     }
 
-    function stopStreaming(Streaming memory _streaming) public virtual {
-        require(
-            _streaming.senderAddress == msg.sender,
-            "The senderAddress should match the transaction sender"
-        );
+    function stopStreaming(HelperLibrary.Streaming memory _streaming)
+        public
+        virtual
+    {
+        require(_streaming.senderAddress == msg.sender);
         // update the balance of the receiver (pay what you owe)
         updateBalanceWithStreamings(_streaming.receiverAddress);
 
@@ -157,6 +149,11 @@ abstract contract ERC20Streamable is ERC20_ {
 
     /*
      * Get the balance reflecting the values from the streamings
+     *
+     * Notes:
+     * - Keep in mind that the value is not going to be updated if no
+     * - blocks are added to the network (in local test networks run another
+     * - transaction before calling this method)
      */
     function balanceOf(address _tokenHolder)
         public
@@ -165,55 +162,12 @@ abstract contract ERC20Streamable is ERC20_ {
         override
         returns (uint256)
     {
-        uint256 balance = _balances[_tokenHolder];
-
-        // First add the pending incoming shares
-        Streaming[] storage receiverStreamings =
-            _streamingsToReceiver[_tokenHolder];
-        // Subject to DoS attack as commented in the CreateStreaming function
-        for (uint256 i = 0; i < receiverStreamings.length; i++) {
-            // This must be true always
-            assert(
-                receiverStreamings[i].startingDate <
-                    receiverStreamings[i].endingDate
+        return
+            HelperLibrary.balanceOf(
+                _balances[_tokenHolder],
+                _streamingsToReceiver[_tokenHolder],
+                _streamingsFromSender[_tokenHolder]
             );
-            if (block.timestamp > receiverStreamings[i].startingDate) {
-                // Add the shares according to the frequency and the transcursed time
-                uint256 addTillDate =
-                    receiverStreamings[i].endingDate < block.timestamp
-                        ? receiverStreamings[i].endingDate
-                        : block.timestamp;
-                uint256 intervalTranscursed =
-                    addTillDate - receiverStreamings[i].startingDate;
-                balance += ((receiverStreamings[i].amount *
-                    intervalTranscursed) / receiverStreamings[i].frequency);
-            }
-        }
-
-        // Then remove the pending outgoing shares
-        Streaming[] storage senderStreamings =
-            _streamingsFromSender[_tokenHolder];
-        // This loop is limited by 5 streamings
-        for (uint256 i = 0; i < senderStreamings.length; i++) {
-            // This must be true always
-            assert(
-                senderStreamings[i].startingDate <
-                    senderStreamings[i].endingDate
-            );
-            if (block.timestamp > senderStreamings[i].startingDate) {
-                // Remove the shares according to the frequency and the transcursed time
-                uint256 removeTillDate =
-                    senderStreamings[i].endingDate < block.timestamp
-                        ? senderStreamings[i].endingDate
-                        : block.timestamp;
-                uint256 intervalTranscursed =
-                    removeTillDate - senderStreamings[i].startingDate;
-                balance -= ((senderStreamings[i].amount * intervalTranscursed) /
-                    senderStreamings[i].frequency);
-            }
-        }
-
-        return balance;
     }
 
     /*
@@ -228,7 +182,7 @@ abstract contract ERC20Streamable is ERC20_ {
         internal
         virtual
     {
-        Streaming[] storage receiverStreamings =
+        HelperLibrary.Streaming[] storage receiverStreamings =
             _streamingsToReceiver[_tokenHolder];
         for (uint256 i = 0; i < receiverStreamings.length; i++) {
             // this must be true always
@@ -263,7 +217,7 @@ abstract contract ERC20Streamable is ERC20_ {
                     );
                 } else {
                     _updateStreaming(
-                        Streaming({
+                        HelperLibrary.Streaming({
                             stype: receiverStreamings[i].stype,
                             senderAddress: receiverStreamings[i].senderAddress,
                             receiverAddress: receiverStreamings[i]
@@ -278,7 +232,7 @@ abstract contract ERC20Streamable is ERC20_ {
             }
         }
 
-        Streaming[] storage senderStreamings =
+        HelperLibrary.Streaming[] storage senderStreamings =
             _streamingsFromSender[_tokenHolder];
         for (uint256 i = 0; i < senderStreamings.length; i++) {
             // this must be true always
@@ -313,7 +267,7 @@ abstract contract ERC20Streamable is ERC20_ {
                     );
                 } else {
                     _updateStreaming(
-                        Streaming({
+                        HelperLibrary.Streaming({
                             stype: senderStreamings[i].stype,
                             senderAddress: senderStreamings[i].senderAddress,
                             receiverAddress: senderStreamings[i]
@@ -329,11 +283,13 @@ abstract contract ERC20Streamable is ERC20_ {
         }
     }
 
-    function _updateStreaming(Streaming memory _streaming) internal {
-        // Update the Streaming from both variables (more gas in storage but less in consulting)
+    function _updateStreaming(HelperLibrary.Streaming memory _streaming)
+        internal
+    {
+        // Update the HelperLibrary.Streaming from both variables (more gas in storage but less in consulting)
 
         // Use storage for less gas in readonly
-        Streaming[] storage senderStreamings =
+        HelperLibrary.Streaming[] storage senderStreamings =
             _streamingsFromSender[_streaming.senderAddress];
         for (uint256 i = 0; i < senderStreamings.length; i++) {
             if (
@@ -351,7 +307,7 @@ abstract contract ERC20Streamable is ERC20_ {
             }
         }
 
-        Streaming[] storage receiverStreamings =
+        HelperLibrary.Streaming[] storage receiverStreamings =
             _streamingsToReceiver[_streaming.receiverAddress];
         for (uint256 i = 0; i < receiverStreamings.length; i++) {
             if (
@@ -372,10 +328,10 @@ abstract contract ERC20Streamable is ERC20_ {
     }
 
     function _stopStreaming(address _fromAddress, address _toAddress) internal {
-        // Delete the Streaming from both variables (more gas in storage but less in consulting)
+        // Delete the HelperLibrary.Streaming from both variables (more gas in storage but less in consulting)
 
         // Use storage for less gas in readonly
-        Streaming[] storage senderStreamings =
+        HelperLibrary.Streaming[] storage senderStreamings =
             _streamingsFromSender[_fromAddress];
         for (uint256 i = 0; i < senderStreamings.length; i++) {
             if (senderStreamings[i].receiverAddress == _toAddress) {
@@ -390,7 +346,7 @@ abstract contract ERC20Streamable is ERC20_ {
             }
         }
 
-        Streaming[] storage receiverStreamings =
+        HelperLibrary.Streaming[] storage receiverStreamings =
             _streamingsToReceiver[_toAddress];
         for (uint256 i = 0; i < receiverStreamings.length; i++) {
             if (receiverStreamings[i].senderAddress == _fromAddress) {
