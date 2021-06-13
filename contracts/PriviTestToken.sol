@@ -7,7 +7,7 @@ import "./ERC20Streamable.sol";
 
 contract PriviTestToken is ERC20_, ERC20Burnable_, ERC20Streamable, Ownable {
     constructor(uint256 initialSupply) ERC20_("PriviTestToken", "PTT") {
-        // default decimals: 18
+        // default decimals: 9
         _mint(msg.sender, initialSupply * 10**decimals());
     }
 
@@ -25,7 +25,7 @@ contract PriviTestToken is ERC20_, ERC20Burnable_, ERC20Streamable, Ownable {
     }
 
     function decimals() public pure override(ERC20_) returns (uint8) {
-        return 18;
+        return 9;
     }
 
     function totalSupply() public view override(ERC20_) returns (uint256) {
