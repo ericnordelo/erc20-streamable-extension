@@ -16,6 +16,11 @@ contract ERC20_ is Context, IERC20, IERC20Metadata {
     string private _name;
     string private _symbol;
 
+    constructor(string memory name_, string memory symbol_) {
+        _name = name_;
+        _symbol = symbol_;
+    }
+
     /**
      * @dev Returns the name of the token.
      */

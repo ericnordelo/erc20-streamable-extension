@@ -1,19 +1,19 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
-import "@openzeppelin/contracts/token/ERC20/extensions/ERC20Burnable.sol";
 import "@openzeppelin/contracts/security/Pausable.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
+import "./ERC20Burnable.sol";
 import "./ERC20Streamable.sol";
 
 contract PriviTestToken is
     ERC20_,
-    ERC20Burnable,
+    ERC20Burnable_,
     ERC20Streamable,
     Pausable,
     Ownable
 {
-    constructor(uint256 initialSupply) ERC20("PriviTestToken", "PTT") {
+    constructor(uint256 initialSupply) ERC20_("PriviTestToken", "PTT") {
         // default decimals: 18
         _mint(msg.sender, initialSupply * 10**decimals());
     }
@@ -32,41 +32,26 @@ contract PriviTestToken is
         _mint(to, amount);
     }
 
-    function name()
-        public
-        view
-        override(ERC20, ERC20_)
-        returns (string memory)
-    {
-        return ERC20.name();
+    function name() public view override(ERC20_) returns (string memory) {
+        return ERC20_.name();
     }
 
-    function symbol()
-        public
-        view
-        override(ERC20, ERC20_)
-        returns (string memory)
-    {
-        return ERC20.symbol();
+    function symbol() public view override(ERC20_) returns (string memory) {
+        return ERC20_.symbol();
     }
 
-    function decimals() public pure override(ERC20, ERC20_) returns (uint8) {
+    function decimals() public pure override(ERC20_) returns (uint8) {
         return 18;
     }
 
-    function totalSupply()
-        public
-        view
-        override(ERC20, ERC20_)
-        returns (uint256)
-    {
-        return ERC20.totalSupply();
+    function totalSupply() public view override(ERC20_) returns (uint256) {
+        return ERC20_.totalSupply();
     }
 
     function balanceOf(address account)
         public
         view
-        override(ERC20, ERC20_, ERC20Streamable)
+        override(ERC20_, ERC20Streamable)
         returns (uint256)
     {
         return ERC20Streamable.balanceOf(account);
@@ -74,81 +59,75 @@ contract PriviTestToken is
 
     function transfer(address recipient, uint256 amount)
         public
-        override(ERC20, ERC20_)
+        override(ERC20_)
         returns (bool)
     {
-        return ERC20.transfer(recipient, amount);
+        return ERC20_.transfer(recipient, amount);
     }
 
     function allowance(address owner, address spender)
         public
         view
-        override(ERC20, ERC20_)
+        override(ERC20_)
         returns (uint256)
     {
-        return ERC20.allowance(owner, spender);
+        return ERC20_.allowance(owner, spender);
     }
 
     function approve(address spender, uint256 amount)
         public
-        override(ERC20, ERC20_)
+        override(ERC20_)
         returns (bool)
     {
-        return ERC20.approve(spender, amount);
+        return ERC20_.approve(spender, amount);
     }
 
     function transferFrom(
         address sender,
         address recipient,
         uint256 amount
-    ) public override(ERC20, ERC20_) returns (bool) {
-        return ERC20.transferFrom(sender, recipient, amount);
+    ) public override(ERC20_) returns (bool) {
+        return ERC20_.transferFrom(sender, recipient, amount);
     }
 
     function increaseAllowance(address spender, uint256 addedValue)
         public
-        override(ERC20, ERC20_)
+        override(ERC20_)
         returns (bool)
     {
-        return ERC20.increaseAllowance(spender, addedValue);
+        return ERC20_.increaseAllowance(spender, addedValue);
     }
 
     function decreaseAllowance(address spender, uint256 subtractedValue)
         public
-        override(ERC20, ERC20_)
+        override(ERC20_)
         returns (bool)
     {
-        return ERC20.decreaseAllowance(spender, subtractedValue);
+        return ERC20_.decreaseAllowance(spender, subtractedValue);
     }
 
     function _transfer(
         address sender,
         address recipient,
         uint256 amount
-    ) internal override(ERC20, ERC20_) {
-        ERC20._transfer(sender, recipient, amount);
+    ) internal override(ERC20_) {
+        ERC20_._transfer(sender, recipient, amount);
     }
 
-    function _mint(address account, uint256 amount)
-        internal
-        override(ERC20, ERC20_)
-    {
-        ERC20._mint(account, amount);
+    function _mint(address account, uint256 amount) internal override(ERC20_) {
+        ERC20_._mint(account, amount);
     }
 
-    function _burn(address account, uint256 amount)
-        internal
-        override(ERC20, ERC20_)
-    {
-        ERC20._burn(account, amount);
+    function _burn(address account, uint256 amount) internal override(ERC20_) {
+        ERC20_._burn(account, amount);
     }
 
     function _approve(
         address owner,
         address spender,
         uint256 amount
-    ) internal override(ERC20, ERC20_) {
-        ERC20._approve(owner, spender, amount);
+    ) internal override(ERC20_) {
+        ERC20_._approve(owner, spender, amount);
     }
 
     // Implementing the pausing mechanism through this hook
@@ -156,7 +135,7 @@ contract PriviTestToken is
         address from,
         address to,
         uint256 amount
-    ) internal override(ERC20Streamable, ERC20, ERC20_) whenNotPaused {
+    ) internal override(ERC20Streamable, ERC20_) whenNotPaused {
         ERC20Streamable._beforeTokenTransfer(from, to, amount);
     }
 }
