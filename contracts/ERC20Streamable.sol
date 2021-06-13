@@ -4,14 +4,14 @@ pragma solidity >=0.4.22 <0.9.0;
 import "./ERC20.sol";
 
 abstract contract ERC20Streamable is ERC20_ {
-    /**
+    /*
      * Notes:
      * - `id` using senderAddress and receiverAddress as id.
      * - `token` the token info is on the state variables _name and _symbol.
      * - `type` using stype because type is a reserved word.
      */
     struct Streaming {
-        string stype;
+        bytes32 stype;
         address senderAddress;
         address receiverAddress;
         uint256 amount;
@@ -47,23 +47,30 @@ abstract contract ERC20Streamable is ERC20_ {
                 count++;
             }
         }
-        require(_expectedCount == count);
+        require(_expectedCount == count, "The expected count doesn't match'");
         _;
     }
 
     modifier validStreaming(Streaming memory _streaming) {
         require(
             keccak256(abi.encodePacked((_streaming.stype))) ==
-                keccak256(abi.encodePacked(("classic")))
+                keccak256(abi.encodePacked(("classic"))),
+            "Invalid type for the Streaming"
         );
-        require(_streaming.receiverAddress != address(0));
-        require(_streaming.amount > 0);
-        require(_streaming.frequency > 0);
-        require(_streaming.startingDate < _streaming.endingDate);
+        require(
+            _streaming.receiverAddress != address(0),
+            "Receiver address couldn't be the 0x0"
+        );
+        require(_streaming.amount > 0, "Amount should be greater than 1");
+        require(_streaming.frequency > 0, "Frequency should be greater than 1");
+        require(
+            _streaming.startingDate < _streaming.endingDate,
+            "The starting date should be before the ending date"
+        );
         _;
     }
 
-    /**
+    /*
      * Creates one streaming
      *
      * Notes:
@@ -76,8 +83,11 @@ abstract contract ERC20Streamable is ERC20_ {
         hasStreamsOpenToAddress(0, _streaming.receiverAddress)
         validStreaming(_streaming)
     {
+        require(
+            _streaming.senderAddress == msg.sender,
+            "The senderAddress should match the transaction sender"
+        );
         // Only 5 streams open at the same time for a specific sender (to avoid out of gas in later transfers)
-        require(_streaming.senderAddress == msg.sender);
         require(
             _streamingsFromSender[_streaming.senderAddress].length <= 5,
             "Only 5 streams open at the same time"
@@ -125,7 +135,10 @@ abstract contract ERC20Streamable is ERC20_ {
     }
 
     function stopStreaming(Streaming memory _streaming) public virtual {
-        require(_streaming.senderAddress == msg.sender);
+        require(
+            _streaming.senderAddress == msg.sender,
+            "The senderAddress should match the transaction sender"
+        );
         // update the balance of the receiver (pay what you owe)
         updateBalanceWithStreamings(_streaming.receiverAddress);
 
