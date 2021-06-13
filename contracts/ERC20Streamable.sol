@@ -11,7 +11,7 @@ abstract contract ERC20Streamable is ERC20_ {
      * Hold the streaming by related address (sender or receiver)
      *
      * Notes:
-     * - Having to variables to populate is expensive, but this is done on purpose
+     * - Having two variables to populate is expensive, but this is done on purpose
      * - because this way you can limit the contracts that you can have open
      * - at the same time (the for loop to update balance could be too expensive
      * - and run our of gas if the app is not designed carefully)
