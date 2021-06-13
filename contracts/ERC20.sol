@@ -6,7 +6,7 @@ import "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import "@openzeppelin/contracts/utils/Context.sol";
 
 // Copy the solidity class to change _balances to internal
-contract ERC20 is Context, IERC20, IERC20Metadata {
+contract ERC20_ is Context, IERC20, IERC20Metadata {
     mapping(address => uint256) internal _balances;
 
     mapping(address => mapping(address => uint256)) private _allowances;
@@ -15,20 +15,6 @@ contract ERC20 is Context, IERC20, IERC20Metadata {
 
     string private _name;
     string private _symbol;
-
-    /**
-     * @dev Sets the values for {name} and {symbol}.
-     *
-     * The defaut value of {decimals} is 18. To select a different value for
-     * {decimals} you should overload it.
-     *
-     * All two of these values are immutable: they can only be set once during
-     * construction.
-     */
-    constructor(string memory name_, string memory symbol_) {
-        _name = name_;
-        _symbol = symbol_;
-    }
 
     /**
      * @dev Returns the name of the token.

@@ -3,7 +3,7 @@ pragma solidity >=0.4.22 <0.9.0;
 
 import "./ERC20.sol";
 
-abstract contract ERC20Streamable is ERC20 {
+abstract contract ERC20Streamable is ERC20_ {
     /**
      * Notes:
      * - `id` using senderAddress and receiverAddress as id.
@@ -22,7 +22,7 @@ abstract contract ERC20Streamable is ERC20 {
 
     event StreamingCreated(address from, address to);
 
-    /**
+    /*
      * Hold the streaming by related address (sender or receiver)
      *
      * Notes:
@@ -51,22 +51,15 @@ abstract contract ERC20Streamable is ERC20 {
         _;
     }
 
-    modifier validStreaming(
-        string memory _stype,
-        address _receiverAddress,
-        uint256 _amount,
-        uint256 _frequency,
-        uint256 _startingDate,
-        uint256 _endingDate
-    ) {
+    modifier validStreaming(Streaming memory _streaming) {
         require(
-            keccak256(abi.encodePacked((_stype))) ==
+            keccak256(abi.encodePacked((_streaming.stype))) ==
                 keccak256(abi.encodePacked(("classic")))
         );
-        require(_receiverAddress != address(0));
-        require(_amount > 0);
-        require(_frequency > 0);
-        require(_startingDate < _endingDate);
+        require(_streaming.receiverAddress != address(0));
+        require(_streaming.amount > 0);
+        require(_streaming.frequency > 0);
+        require(_streaming.startingDate < _streaming.endingDate);
         _;
     }
 
@@ -77,45 +70,32 @@ abstract contract ERC20Streamable is ERC20 {
      * - The sender can't create 2 streaming for the same receiver,
      * - in case this is needed he should update the existing one
      */
-    function createStreaming(
-        string calldata _stype,
-        address _receiverAddress,
-        uint256 _amount,
-        uint256 _frequency,
-        uint256 _startingDate,
-        uint256 _endingDate
-    )
+    function createStreaming(Streaming memory _streaming)
         external
         virtual
-        hasStreamsOpenToAddress(0, _receiverAddress)
-        validStreaming(
-            _stype,
-            _receiverAddress,
-            _amount,
-            _frequency,
-            _startingDate,
-            _endingDate
-        )
+        hasStreamsOpenToAddress(0, _streaming.receiverAddress)
+        validStreaming(_streaming)
     {
         // Only 5 streams open at the same time for a specific sender (to avoid out of gas in later transfers)
+        require(_streaming.senderAddress == msg.sender);
         require(
-            _streamingsFromSender[msg.sender].length <= 5,
+            _streamingsFromSender[_streaming.senderAddress].length <= 5,
             "Only 5 streams open at the same time"
         );
 
         Streaming memory stream =
             Streaming({
-                stype: _stype,
-                senderAddress: msg.sender,
-                receiverAddress: _receiverAddress,
-                frequency: uint64(_frequency),
-                amount: _amount,
-                startingDate: uint64(_startingDate),
-                endingDate: uint64(_endingDate)
+                stype: _streaming.stype,
+                senderAddress: _streaming.senderAddress,
+                receiverAddress: _streaming.receiverAddress,
+                frequency: uint64(_streaming.frequency),
+                amount: _streaming.amount,
+                startingDate: uint64(_streaming.startingDate),
+                endingDate: uint64(_streaming.endingDate)
             });
 
         // Save the new stream in the two variables (in order to cheaper checks later)
-        _streamingsFromSender[msg.sender].push(stream);
+        _streamingsFromSender[_streaming.senderAddress].push(stream);
 
         // ! Here there are a vulneribility
         // A DoS attack can be done over one address creating a lot of streams
@@ -123,46 +103,37 @@ abstract contract ERC20Streamable is ERC20 {
         // the balance over this array always fail with out of gas.
         // This could be avoided by asking the receiver to confirm the flow in a
         // intermediate state of the contract
-        _streamingsToReceiver[_receiverAddress].push(stream);
+        _streamingsToReceiver[_streaming.receiverAddress].push(stream);
 
-        emit StreamingCreated(msg.sender, _receiverAddress);
-    }
-
-    function updateStreaming(
-        string calldata _stype,
-        address _receiverAddress,
-        uint256 _amount,
-        uint256 _frequency,
-        uint256 _startingDate,
-        uint256 _endingDate
-    )
-        external
-        virtual
-        hasStreamsOpenToAddress(1, _receiverAddress)
-        validStreaming(
-            _stype,
-            _receiverAddress,
-            _amount,
-            _frequency,
-            _startingDate,
-            _endingDate
-        )
-    {
-        // update the balances (pay what you owe)
-        updateBalanceWithStreamings(_receiverAddress);
-
-        // make the update
-        _updateStreaming(
-            _stype,
-            msg.sender,
-            _receiverAddress,
-            _amount,
-            _frequency,
-            _startingDate,
-            _endingDate
+        emit StreamingCreated(
+            _streaming.senderAddress,
+            _streaming.receiverAddress
         );
     }
 
+    function updateStreaming(Streaming memory _streaming)
+        public
+        virtual
+        hasStreamsOpenToAddress(1, _streaming.receiverAddress)
+        validStreaming(_streaming)
+    {
+        // update the balances (pay what you owe)
+        updateBalanceWithStreamings(_streaming.receiverAddress);
+
+        // make the update
+        _updateStreaming(_streaming);
+    }
+
+    function stopStreaming(Streaming memory _streaming) public virtual {
+        require(_streaming.senderAddress == msg.sender);
+        // update the balance of the receiver (pay what you owe)
+        updateBalanceWithStreamings(_streaming.receiverAddress);
+
+        // stop the streaming
+        _stopStreaming(msg.sender, _streaming.receiverAddress);
+    }
+
+    // overload with just the receiver
     function stopStreaming(address _receiverAddress) external virtual {
         // update the balance of the receiver (pay what you owe)
         updateBalanceWithStreamings(_receiverAddress);
@@ -171,7 +142,7 @@ abstract contract ERC20Streamable is ERC20 {
         _stopStreaming(msg.sender, _receiverAddress);
     }
 
-    /**
+    /*
      * Get the balance reflecting the values from the streamings
      */
     function balanceOf(address _tokenHolder)
@@ -232,7 +203,7 @@ abstract contract ERC20Streamable is ERC20 {
         return balance;
     }
 
-    /**
+    /*
      * Update the balance reflecting the values from the streamings (expensive function)
      *
      * Notes:
@@ -279,13 +250,16 @@ abstract contract ERC20Streamable is ERC20 {
                     );
                 } else {
                     _updateStreaming(
-                        receiverStreamings[i].stype,
-                        receiverStreamings[i].senderAddress,
-                        receiverStreamings[i].receiverAddress,
-                        receiverStreamings[i].amount,
-                        receiverStreamings[i].frequency,
-                        addTillDate,
-                        receiverStreamings[i].endingDate
+                        Streaming({
+                            stype: receiverStreamings[i].stype,
+                            senderAddress: receiverStreamings[i].senderAddress,
+                            receiverAddress: receiverStreamings[i]
+                                .receiverAddress,
+                            frequency: receiverStreamings[i].frequency,
+                            amount: receiverStreamings[i].amount,
+                            startingDate: uint64(addTillDate),
+                            endingDate: receiverStreamings[i].endingDate
+                        })
                     );
                 }
             }
@@ -326,53 +300,59 @@ abstract contract ERC20Streamable is ERC20 {
                     );
                 } else {
                     _updateStreaming(
-                        senderStreamings[i].stype,
-                        senderStreamings[i].senderAddress,
-                        senderStreamings[i].receiverAddress,
-                        senderStreamings[i].amount,
-                        senderStreamings[i].frequency,
-                        removeTillDate,
-                        senderStreamings[i].endingDate
+                        Streaming({
+                            stype: senderStreamings[i].stype,
+                            senderAddress: senderStreamings[i].senderAddress,
+                            receiverAddress: senderStreamings[i]
+                                .receiverAddress,
+                            frequency: senderStreamings[i].frequency,
+                            amount: senderStreamings[i].amount,
+                            startingDate: uint64(removeTillDate),
+                            endingDate: senderStreamings[i].endingDate
+                        })
                     );
                 }
             }
         }
     }
 
-    function _updateStreaming(
-        string memory _stype,
-        address _senderAddress,
-        address _receiverAddress,
-        uint256 _amount,
-        uint256 _frequency,
-        uint256 _startingDate,
-        uint256 _endingDate
-    ) internal {
+    function _updateStreaming(Streaming memory _streaming) internal {
         // Update the Streaming from both variables (more gas in storage but less in consulting)
 
         // Use storage for less gas in readonly
         Streaming[] storage senderStreamings =
-            _streamingsFromSender[_senderAddress];
+            _streamingsFromSender[_streaming.senderAddress];
         for (uint256 i = 0; i < senderStreamings.length; i++) {
-            if (senderStreamings[i].receiverAddress == _receiverAddress) {
-                senderStreamings[i].stype = _stype;
-                senderStreamings[i].amount = _amount;
-                senderStreamings[i].frequency = uint64(_frequency);
-                senderStreamings[i].startingDate = uint64(_startingDate);
-                senderStreamings[i].endingDate = uint64(_endingDate);
+            if (
+                senderStreamings[i].receiverAddress ==
+                _streaming.receiverAddress
+            ) {
+                senderStreamings[i].stype = _streaming.stype;
+                senderStreamings[i].amount = _streaming.amount;
+                senderStreamings[i].frequency = uint64(_streaming.frequency);
+                senderStreamings[i].startingDate = uint64(
+                    _streaming.startingDate
+                );
+                senderStreamings[i].endingDate = uint64(_streaming.endingDate);
                 break;
             }
         }
 
         Streaming[] storage receiverStreamings =
-            _streamingsToReceiver[_receiverAddress];
+            _streamingsToReceiver[_streaming.receiverAddress];
         for (uint256 i = 0; i < receiverStreamings.length; i++) {
-            if (receiverStreamings[i].senderAddress == _senderAddress) {
-                receiverStreamings[i].stype = _stype;
-                receiverStreamings[i].amount = _amount;
-                receiverStreamings[i].frequency = uint64(_frequency);
-                receiverStreamings[i].startingDate = uint64(_startingDate);
-                receiverStreamings[i].endingDate = uint64(_endingDate);
+            if (
+                receiverStreamings[i].senderAddress == _streaming.senderAddress
+            ) {
+                receiverStreamings[i].stype = _streaming.stype;
+                receiverStreamings[i].amount = _streaming.amount;
+                receiverStreamings[i].frequency = uint64(_streaming.frequency);
+                receiverStreamings[i].startingDate = uint64(
+                    _streaming.startingDate
+                );
+                receiverStreamings[i].endingDate = uint64(
+                    _streaming.endingDate
+                );
                 break;
             }
         }
@@ -418,7 +398,7 @@ abstract contract ERC20Streamable is ERC20 {
         address from,
         address to,
         uint256 amount
-    ) internal override {
+    ) internal virtual override {
         // Update the balance before sending
         updateBalanceWithStreamings(from);
         super._beforeTokenTransfer(from, to, amount);
