@@ -1,0 +1,27 @@
+{
+  "name": "privi-test",
+  "version": "1.0.0",
+  "description": "",
+  "main": "truffle-config.js",
+  "directories": {
+    "test": "test"
+  },
+  "dependencies": {
+    "@openzeppelin/contracts": "^4.1.0",
+    "truffle": "^5.3.10"
+  },
+  "devDependencies": {},
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ericnordelo/privi-test-token.git"
+  },
+  "author": "Eric Nordelo",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/ericnordelo/privi-test-token/issues"
+  },
+  "homepage": "https://github.com/ericnordelo/privi-test-token#readme"
+}

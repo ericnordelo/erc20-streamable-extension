@@ -22,7 +22,7 @@ contract("PriviTestToken", function (accounts) {
   });
   it("should get balance from helper library", async function () {
     let balance = await token.balanceOf.call(accounts[0]);
-    return assert.equal(balance.toNumber(), 1000000000, "Library function returned unexpected function, linkage may be broken");
+    return assert.equal(balance.toNumber(), 1000000000, "Library returned unexpected value, linkage may be broken");
   });
   it("should be able to transfer", async function () {
     await token.transfer(accounts[1], 15, {from: accounts[0]});
