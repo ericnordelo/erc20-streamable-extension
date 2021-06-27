@@ -1,5 +1,5 @@
 {
-  "name": "privi-test",
+  "name": "privi-streaming",
   "version": "1.0.0",
   "description": "",
   "main": "truffle-config.js",
@@ -8,14 +8,24 @@
   },
   "dependencies": {
     "@openzeppelin/contracts": "^4.1.0",
-    "truffle": "^5.3.10"
+    "dotenv": "^10.0.0",
+    "truffle": "^5.3.10",
+    "@truffle/hdwallet-provider": "^1.4.0"
   },
-  "devDependencies": {},
+  "devDependencies": {
+    "@openzeppelin/test-helpers": "^0.5.11",
+    "@openzeppelin/truffle-upgrades": "^1.7.1",
+    "prettier": "^2.3.1",
+    "prettier-plugin-solidity": "^1.0.0-beta.13",
+    "solhint": "^3.3.6",
+    "solhint-plugin-prettier": "0.0.5",
+    "truffle-plugin-verify": "^0.5.9"
+  },
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "solhint": "./node_modules/.bin/solhint contracts/*.sol",
+    "prettier:solidity": "./node_modules/.bin/prettier --write contracts/*.sol"
   },
   "repository": {
-    "type": "git",
     "url": "git+https://github.com/ericnordelo/privi-test-token.git"
   },
   "author": "Eric Nordelo",

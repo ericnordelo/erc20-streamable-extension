@@ -18,11 +18,26 @@
  *
  */
 
-// const HDWalletProvider = require('@truffle/hdwallet-provider');
-// const infuraKey = "fj4jll3k.....";
-//
-// const fs = require('fs');
-// const mnemonic = fs.readFileSync(".secret").toString().trim();
+const HDWalletProvider = require('@truffle/hdwallet-provider');
+const { resolve } = require('path');
+const { config: dotenvConfig } = require('dotenv');
+
+dotenvConfig({ path: resolve(__dirname, './.env') });
+
+const mnemonic = process.env.MNEMONIC;
+const infuraKey = process.env.INFURA_API_KEY;
+const etherscanApiKey = process.env.ETHER_SCAN_API_KEY;
+
+// Ensure that we have all the environment variables we need.
+if (!mnemonic) {
+  throw new Error('Please set your MNEMONIC in a .env file');
+}
+if (!infuraKey) {
+  throw new Error('Please set your INFURA_API_KEY in a .env file');
+}
+if (!etherscanApiKey) {
+  throw new Error('Please set your ETHER_SCAN_API_KEY in a .env file');
+}
 
 module.exports = {
   /**
@@ -43,9 +58,9 @@ module.exports = {
     // options below to some value.
     //
     development: {
-     host: "127.0.0.1",     // Localhost (default: none)
-     port: 7545,            // Standard Ethereum port (default: none)
-     network_id: "*",       // Any network (default: none)
+      host: '127.0.0.1', // Localhost (default: none)
+      port: 7545, // Standard Ethereum port (default: none)
+      network_id: '*', // Any network (default: none)
     },
     // Another network with more advanced options...
     // advanced: {
@@ -58,20 +73,41 @@ module.exports = {
     // },
     // Useful for deploying to a public network.
     // NB: It's important to wrap the provider as a function.
-    // ropsten: {
-    // provider: () => new HDWalletProvider(mnemonic, `https://ropsten.infura.io/v3/YOUR-PROJECT-ID`),
-    // network_id: 3,       // Ropsten's id
-    // gas: 5500000,        // Ropsten has a lower block limit than mainnet
-    // confirmations: 2,    // # of confs to wait between deployments. (default: 0)
-    // timeoutBlocks: 200,  // # of blocks before a deployment times out  (minimum/default: 50)
-    // skipDryRun: true     // Skip dry run before migrations? (default: false for public nets )
-    // },
-    // Useful for private networks
-    // private: {
-    // provider: () => new HDWalletProvider(mnemonic, `https://network.io`),
-    // network_id: 2111,   // This network is yours, in the cloud.
-    // production: true    // Treats this network as if it was a public net. (default: false)
-    // }
+    ropsten: {
+      provider: () => new HDWalletProvider(mnemonic, `wss://ropsten.infura.io/ws/v3/${infuraKey}`),
+      network_id: 3, // Ropsten's id
+      gas: 5500000, // Ropsten has a lower block limit than mainnet
+      confirmations: 2, // # of confs to wait between deployments. (default: 0)
+      timeoutBlocks: 200, // # of blocks before a deployment times out  (minimum/default: 50)
+      skipDryRun: true, // Skip dry run before migrations? (default: false for public nets )
+    },
+    rinkeby: {
+      provider: () => new HDWalletProvider(mnemonic, `wss://rinkeby.infura.io/ws/v3/${infuraKey}`),
+      network_id: 4, // rinkeby's id
+      skipDryRun: true, // Skip dry run before migrations? (default: false for public nets )
+      networkCheckTimeout: 999999,
+    },
+    live: {
+      provider: () => new HDWalletProvider(mnemonic, `wss://mainnet.infura.io/ws/v3/${infuraKey}`),
+      network_id: 1, // mainnet's id
+      gas: 26e5,
+      gasPrice: 195e9,
+      skipDryRun: true, // Skip dry run before migrations? (default: false for public nets )
+    },
+    mumbai: {
+      provider: () => new HDWalletProvider(mnemonic, `wss://rpc-mumbai.maticvigil.com/ws`),
+      network_id: 80001,
+      confirmations: 2,
+      timeoutBlocks: 200,
+      skipDryRun: true,
+    },
+    matic: {
+      provider: () => new HDWalletProvider(mnemonic, `https://rpc-mainnet.matic.today`),
+      network_id: 137,
+      confirmations: 2,
+      timeoutBlocks: 200,
+      skipDryRun: true,
+    },
   },
 
   // Set default mocha options here, use special reporters etc.
@@ -82,7 +118,7 @@ module.exports = {
   // Configure your compilers
   compilers: {
     solc: {
-      version: "0.8.1",    // Fetch exact version from solc-bin (default: truffle's version)
+      version: '0.8.1', // Fetch exact version from solc-bin (default: truffle's version)
       // docker: true,        // Use "0.5.1" you've installed locally with docker (default: false)
       // settings: {          // See the solidity docs for advice about optimization and evmVersion
       //  optimizer: {
@@ -91,7 +127,7 @@ module.exports = {
       //  },
       //  evmVersion: "byzantium"
       // }
-    }
+    },
   },
 
   // Truffle DB is currently disabled by default; to enable it, change enabled: false to enabled: true
@@ -101,6 +137,6 @@ module.exports = {
   // $ truffle migrate --reset --compile-all
 
   db: {
-    enabled: false
-  }
+    enabled: false,
+  },
 };

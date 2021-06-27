@@ -1,375 +1,297 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
-import "./ERC20.sol";
-import "./HelperLibrary.sol";
+import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import "@openzeppelin/contracts/access/AccessControl.sol";
+import "@openzeppelin/contracts/utils/Counters.sol";
+import "./StreamingManager.sol";
+import "./Structs.sol";
 
-abstract contract ERC20Streamable is ERC20_ {
-    event StreamingCreated(address from, address to);
+abstract contract ERC20Streamable is ERC20, AccessControl {
+    using Counters for Counters.Counter;
 
-    /*
-     * Hold the streaming by related address (sender or receiver)
-     *
-     * Notes:
-     * - Having two variables to populate is expensive, but this is done on purpose
-     * - because this way you can limit the contracts that you can have open
-     * - at the same time (the for loop to update balance could be too expensive
-     * - and run our of gas if the app is not designed carefully)
-     */
-    mapping(address => HelperLibrary.Streaming[]) private _streamingsFromSender;
-    mapping(address => HelperLibrary.Streaming[]) private _streamingsToReceiver;
+    Counters.Counter private _streamingIds;
 
-    modifier hasStreamsOpenToAddress(
-        uint256 _expectedCount,
-        address _receiverAddress
-    ) {
-        // Use storage for less gas in readonly
-        HelperLibrary.Streaming[] storage senderStreamings =
-            _streamingsFromSender[msg.sender];
-        uint256 count = 0;
-        for (uint256 i = 0; i < senderStreamings.length; i++) {
-            if (senderStreamings[i].receiverAddress == _receiverAddress) {
-                count++;
-            }
-        }
-        require(_expectedCount == count, "Incorrect number of open streamings");
-        _;
+    bytes32 public constant ADMIN = keccak256("admin");
+
+    address public streamingManagerAddress;
+    StreamingManager private _streamingManager;
+
+    mapping(address => mapping(address => bool)) private _openStreamings;
+    mapping(uint256 => Streaming) private _streamings;
+    mapping(address => FlowInfo) private _incomingFlows;
+    mapping(address => FlowInfo) private _outgoingFlows;
+
+    event StreamingCreated(address indexed from, address indexed to, uint256 indexed id, uint64 endingDate);
+    event StreamingStopped(address indexed from, address indexed to);
+    event StreamingUpdated(address indexed from, address indexed to, uint256 indexed id, uint64 endingDate);
+
+    constructor() {
+        // The super admin is the deployer
+        _setupRole(DEFAULT_ADMIN_ROLE, msg.sender);
+        _setupRole(ADMIN, msg.sender);
     }
 
-    modifier validStreaming(HelperLibrary.Streaming memory _streaming) {
+    function setStreamingManagerAddress(address _streamingManagerAddress) external onlyRole(ADMIN) {
+        streamingManagerAddress = _streamingManagerAddress;
+        _streamingManager = StreamingManager(_streamingManagerAddress);
+    }
+
+    modifier isValidStreaming(Streaming memory _streaming) {
         require(
-            keccak256(abi.encodePacked((_streaming.stype))) ==
-                keccak256(abi.encodePacked(("classic"))),
+            keccak256(abi.encodePacked((_streaming.stype))) == keccak256(abi.encodePacked(("classic"))),
             "Invalid type of open streamings"
         );
-        require(_streaming.receiverAddress != address(0));
-        require(_streaming.amount > 0);
-        require(_streaming.frequency > 0);
-        require(_streaming.startingDate < _streaming.endingDate);
+        require(_streaming.senderAddress == msg.sender, "Invalid sender");
+        require(_streaming.receiverAddress != address(0), "Invalid receiver");
+        require(_streaming.amountPerSecond > 0, "Invalid amount per second");
+        require(_streaming.startingDate < _streaming.endingDate, "Invalid duration interval");
         _;
     }
 
-    // Getters for the Streamings
-    function getSenderStreamings(address _fromAddress)
-        public
-        view
-        virtual
-        returns (HelperLibrary.Streaming[] memory)
-    {
-        return _streamingsFromSender[_fromAddress];
+    function checkOnlySenderOrAdmin(address _sender) internal view {
+        require(_sender == msg.sender || hasRole(ADMIN, msg.sender), "Permission denied");
     }
 
-    function getReceiverStreamings(address _toAddress)
-        public
-        view
-        virtual
-        returns (HelperLibrary.Streaming[] memory)
-    {
-        return _streamingsToReceiver[_toAddress];
-    }
+    // creates one streaming
+    function createStreaming(Streaming memory _streaming) external isValidStreaming(_streaming) {
+        require(block.timestamp < _streaming.endingDate, "Invalid ending date");
+        require(
+            _openStreamings[_streaming.senderAddress][_streaming.receiverAddress],
+            "Can't open two streams to same address"
+        );
+        _streaming.startingDate = uint64(block.timestamp);
 
-    /*
-     * Creates one streaming
-     *
-     * Notes:
-     * - The sender can't create 2 streaming for the same receiver,
-     * - in case this is needed he should update the existing one
-     */
-    function createStreaming(HelperLibrary.Streaming memory _streaming)
-        external
-        virtual
-        hasStreamsOpenToAddress(0, _streaming.receiverAddress)
-        validStreaming(_streaming)
-    {
-        require(_streaming.senderAddress == msg.sender);
-        // Only 5 streams open at the same time for a specific sender (to avoid out of gas in later transfers)
-        require(_streamingsFromSender[_streaming.senderAddress].length <= 5);
+        uint256 totalAmount = _streaming.amountPerSecond * (_streaming.endingDate - _streaming.startingDate);
 
-        HelperLibrary.Streaming memory stream =
-            HelperLibrary.Streaming({
-                stype: _streaming.stype,
-                senderAddress: _streaming.senderAddress,
-                receiverAddress: _streaming.receiverAddress,
-                frequency: uint64(_streaming.frequency),
-                amount: _streaming.amount,
-                startingDate: uint64(_streaming.startingDate),
-                endingDate: uint64(_streaming.endingDate)
-            });
+        // should have enough balance to open the streaming
+        require(totalAmount <= balanceOf(msg.sender), "Not enough balance");
 
-        // Save the new stream in the two variables (in order to cheaper checks later)
-        _streamingsFromSender[_streaming.senderAddress].push(stream);
+        _streamingIds.increment();
+        uint256 newStreamingId = _streamingIds.current();
 
-        // ! Here there are a vulneribility
-        // A DoS attack can be done over one address creating a lot of streams
-        // from different address, making the transfer operation, which recalculates
-        // the balance over this array always fail with out of gas.
-        // This could be avoided by asking the receiver to confirm the flow in a
-        // intermediate state of the contract
-        _streamingsToReceiver[_streaming.receiverAddress].push(stream);
+        _streamings[newStreamingId] = _streaming;
+        _openStreamings[_streaming.senderAddress][_streaming.receiverAddress] = true;
+
+        // update flows
+        _incomingFlows[_streaming.receiverAddress].flow.amountPerSecond += _streaming.amountPerSecond;
+        _outgoingFlows[_streaming.senderAddress].flow.amountPerSecond += _streaming.amountPerSecond;
+
+        // update flow infos
+        FlowInfo memory incomingFlowInfo = _incomingFlows[_streaming.receiverAddress];
+        FlowInfo memory outgoingFlowInfo = _outgoingFlows[_streaming.senderAddress];
+
+        if (incomingFlowInfo.flow.startingDate == 0) {
+            _incomingFlows[_streaming.receiverAddress].flow.startingDate = _streaming.startingDate;
+        } else {
+            _incomingFlows[_streaming.receiverAddress].totalPreviousValueGenerated +=
+                (_streaming.startingDate - incomingFlowInfo.flow.startingDate) *
+                incomingFlowInfo.flow.amountPerSecond;
+
+            _incomingFlows[_streaming.receiverAddress].flow.startingDate = _streaming.startingDate;
+        }
+        if (outgoingFlowInfo.flow.startingDate == 0) {
+            _outgoingFlows[_streaming.senderAddress].flow.startingDate = _streaming.startingDate;
+        } else {
+            _outgoingFlows[_streaming.senderAddress].totalPreviousValueGenerated +=
+                (_streaming.startingDate - outgoingFlowInfo.flow.startingDate) *
+                outgoingFlowInfo.flow.amountPerSecond;
+
+            _outgoingFlows[_streaming.senderAddress].flow.startingDate = _streaming.startingDate;
+        }
+
+        // transfer the total amount to the manager
+        transfer(streamingManagerAddress, totalAmount);
 
         emit StreamingCreated(
             _streaming.senderAddress,
-            _streaming.receiverAddress
+            _streaming.receiverAddress,
+            newStreamingId,
+            _streaming.endingDate
         );
     }
 
-    function updateStreaming(HelperLibrary.Streaming memory _streaming)
-        public
-        virtual
-        hasStreamsOpenToAddress(1, _streaming.receiverAddress)
-        validStreaming(_streaming)
+    function updateStreaming(uint256 _streamingId, StreamingUpdateRequest calldata _streamingUpdateRequest)
+        external
     {
-        // update the balances (pay what you owe)
-        updateBalanceWithStreamings(_streaming.receiverAddress);
+        Streaming memory streaming = getStreaming(_streamingId);
+        uint256 currentTimestamp = block.timestamp;
+        if (
+            streaming.startingDate >= _streamingUpdateRequest.endingDate ||
+            _streamingUpdateRequest.endingDate <= currentTimestamp ||
+            streaming.senderAddress != msg.sender ||
+            _streamingUpdateRequest.amountPerSecond <= 0
+        ) {
+            revert("Invalid request");
+        }
 
-        // make the update
-        _updateStreaming(_streaming);
+        if (streaming.endingDate <= currentTimestamp) {
+            _stop(streaming, _streamingId);
+        } else {
+            uint256 quantityToPayToReceiver;
+
+            if (currentTimestamp > streaming.startingDate) {
+                uint256 intervalTranscursed = currentTimestamp - streaming.startingDate;
+                quantityToPayToReceiver = ((streaming.amountPerSecond * intervalTranscursed));
+                streaming.startingDate = uint64(currentTimestamp);
+            }
+
+            // calculate how much should streaming manager hold now and update
+            uint256 currentHolding = (streaming.amountPerSecond *
+                (streaming.endingDate - streaming.startingDate)) - quantityToPayToReceiver;
+            uint256 expectedHolding = _streamingUpdateRequest.amountPerSecond *
+                (_streamingUpdateRequest.endingDate - streaming.startingDate);
+
+            // update flow infos
+            FlowInfo memory incomingFlowInfo = _incomingFlows[streaming.receiverAddress];
+            FlowInfo memory outgoingFlowInfo = _outgoingFlows[streaming.senderAddress];
+
+            _incomingFlows[streaming.receiverAddress].totalPreviousValueGenerated +=
+                (currentTimestamp - incomingFlowInfo.flow.startingDate) *
+                incomingFlowInfo.flow.amountPerSecond;
+
+            _incomingFlows[streaming.receiverAddress].flow.startingDate = uint64(currentTimestamp);
+
+            _outgoingFlows[streaming.senderAddress].totalPreviousValueGenerated +=
+                (currentTimestamp - outgoingFlowInfo.flow.startingDate) *
+                outgoingFlowInfo.flow.amountPerSecond;
+
+            _outgoingFlows[streaming.senderAddress].flow.startingDate = uint64(currentTimestamp);
+
+            if (quantityToPayToReceiver > 0) {
+                _incomingFlows[streaming.receiverAddress]
+                .totalPreviousValueTransfered += quantityToPayToReceiver;
+                _outgoingFlows[streaming.senderAddress]
+                .totalPreviousValueTransfered += quantityToPayToReceiver;
+            }
+
+            // update flows
+            _incomingFlows[streaming.receiverAddress].flow.amountPerSecond =
+                _incomingFlows[streaming.receiverAddress].flow.amountPerSecond -
+                streaming.amountPerSecond +
+                _streamingUpdateRequest.amountPerSecond;
+            _outgoingFlows[streaming.senderAddress].flow.amountPerSecond =
+                _outgoingFlows[streaming.senderAddress].flow.amountPerSecond -
+                streaming.amountPerSecond +
+                _streamingUpdateRequest.amountPerSecond;
+
+            // update the streaming
+            _streamings[_streamingId].startingDate = uint64(currentTimestamp);
+            _streamings[_streamingId].amountPerSecond = _streamingUpdateRequest.amountPerSecond;
+            _streamings[_streamingId].endingDate = _streamingUpdateRequest.endingDate;
+
+            // make the transfers (the payment and the return)
+            if (quantityToPayToReceiver > 0) {
+                _streamingManager.transfer(streaming.receiverAddress, quantityToPayToReceiver);
+            }
+            // update streaming manager balance
+            if (currentHolding > expectedHolding) {
+                _streamingManager.transfer(streaming.senderAddress, expectedHolding - currentHolding);
+            } else if (currentHolding < expectedHolding) {
+                transfer(streamingManagerAddress, currentHolding - expectedHolding);
+            }
+
+            emit StreamingUpdated(
+                streaming.senderAddress,
+                streaming.receiverAddress,
+                _streamingId,
+                _streamingUpdateRequest.endingDate
+            );
+        }
     }
 
-    function stopStreaming(HelperLibrary.Streaming memory _streaming)
-        public
-        virtual
-    {
-        require(_streaming.senderAddress == msg.sender);
+    // stop a streaming (protected against reentracy by check-effect-interactions pattern)
+    function stopStreaming(uint256 _streamingId) external {
+        Streaming memory streaming = getStreaming(_streamingId);
+
+        checkOnlySenderOrAdmin(streaming.senderAddress);
+
+        _stop(streaming, _streamingId);
+    }
+
+    // getters by id
+    function getStreaming(uint256 _streamingId) public view returns (Streaming memory) {
+        require(_streamings[_streamingId].amountPerSecond > 0, "Query for unexisting streaming");
+        return _streamings[_streamingId];
+    }
+
+    function balanceOf(address account) public view virtual override returns (uint256) {
+        uint256 notYetPaidIncomingFlow = _incomingFlows[account].totalPreviousValueGenerated -
+            _incomingFlows[account].totalPreviousValueTransfered;
+        uint256 notYetPaidOutgoingFlow = _outgoingFlows[account].totalPreviousValueGenerated -
+            _outgoingFlows[account].totalPreviousValueTransfered;
+        return super.balanceOf(account) + notYetPaidIncomingFlow - notYetPaidOutgoingFlow;
+    }
+
+    function _stop(Streaming memory streaming, uint256 _streamingId) internal {
         // update the balance of the receiver (pay what you owe)
-        updateBalanceWithStreamings(_streaming.receiverAddress);
+
+        // this must be true always
+        assert(streaming.startingDate < streaming.endingDate);
+
+        uint256 quantityToPay;
+        uint256 quantityToReturn;
+
+        if (block.timestamp > streaming.startingDate) {
+            uint256 totalAmount = streaming.amountPerSecond * (streaming.endingDate - streaming.startingDate);
+
+            uint256 addTillDate = streaming.endingDate < block.timestamp
+                ? streaming.endingDate
+                : block.timestamp;
+            uint256 intervalTranscursed = addTillDate - streaming.startingDate;
+
+            quantityToPay = ((streaming.amountPerSecond * intervalTranscursed));
+            quantityToReturn = totalAmount - quantityToPay;
+        }
 
         // stop the streaming
-        _stopStreaming(msg.sender, _streaming.receiverAddress);
-    }
+        delete _streamings[_streamingId];
+        _openStreamings[streaming.senderAddress][streaming.receiverAddress] = false;
 
-    // overload with just the receiver
-    function stopStreaming(address _receiverAddress) external virtual {
-        // update the balance of the receiver (pay what you owe)
-        updateBalanceWithStreamings(_receiverAddress);
+        // update flows
+        _incomingFlows[streaming.receiverAddress].flow.amountPerSecond -= streaming.amountPerSecond;
+        _outgoingFlows[streaming.senderAddress].flow.amountPerSecond -= streaming.amountPerSecond;
 
-        // stop the streaming
-        _stopStreaming(msg.sender, _receiverAddress);
-    }
+        // update flow infos
+        FlowInfo memory incomingFlowInfo = _incomingFlows[streaming.receiverAddress];
+        FlowInfo memory outgoingFlowInfo = _outgoingFlows[streaming.senderAddress];
 
-    /*
-     * Get the balance reflecting the values from the streamings
-     *
-     * Notes:
-     * - Keep in mind that the value is not going to be updated if no
-     * - blocks are added to the network (in local test networks run another
-     * - transaction before calling this method)
-     */
-    function balanceOf(address _tokenHolder)
-        public
-        view
-        virtual
-        override
-        returns (uint256)
-    {
-        return
-            HelperLibrary.balanceOf(
-                _balances[_tokenHolder],
-                _streamingsToReceiver[_tokenHolder],
-                _streamingsFromSender[_tokenHolder]
-            );
-    }
+        _incomingFlows[streaming.receiverAddress].totalPreviousValueGenerated +=
+            (streaming.startingDate - incomingFlowInfo.flow.startingDate) *
+            incomingFlowInfo.flow.amountPerSecond;
 
-    /*
-     * Update the balance reflecting the values from the streamings (expensive function)
-     *
-     * Notes:
-     * - Same idea as the balanceOf but modifying the storage, the DRY principle
-     * - seems to be broken here, but the logic should be repeated in order
-     * - to save gas in balanceOf calls
-     */
-    function updateBalanceWithStreamings(address _tokenHolder)
-        internal
-        virtual
-    {
-        HelperLibrary.Streaming[] storage receiverStreamings =
-            _streamingsToReceiver[_tokenHolder];
-        for (uint256 i = 0; i < receiverStreamings.length; i++) {
-            // this must be true always
-            assert(
-                receiverStreamings[i].startingDate <
-                    receiverStreamings[i].endingDate
-            );
-            if (block.timestamp > receiverStreamings[i].startingDate) {
-                uint256 addTillDate =
-                    receiverStreamings[i].endingDate < block.timestamp
-                        ? receiverStreamings[i].endingDate
-                        : block.timestamp;
-                uint256 intervalTranscursed =
-                    addTillDate - receiverStreamings[i].startingDate;
+        _incomingFlows[streaming.receiverAddress].flow.startingDate = streaming.startingDate;
 
-                uint256 quantityChanged =
-                    ((receiverStreamings[i].amount * intervalTranscursed) /
-                        receiverStreamings[i].frequency);
+        _outgoingFlows[streaming.senderAddress].totalPreviousValueGenerated +=
+            (streaming.startingDate - outgoingFlowInfo.flow.startingDate) *
+            outgoingFlowInfo.flow.amountPerSecond;
 
-                // update the balances (expensive operation)
-                _balances[_tokenHolder] += quantityChanged;
-                _balances[
-                    receiverStreamings[i].senderAddress
-                ] -= quantityChanged;
+        _outgoingFlows[streaming.senderAddress].flow.startingDate = streaming.startingDate;
 
-                // update stream
-                if (addTillDate >= receiverStreamings[i].endingDate) {
-                    // remove the stream because is already finished
-                    _stopStreaming(
-                        _tokenHolder,
-                        receiverStreamings[i].senderAddress
-                    );
-                } else {
-                    _updateStreaming(
-                        HelperLibrary.Streaming({
-                            stype: receiverStreamings[i].stype,
-                            senderAddress: receiverStreamings[i].senderAddress,
-                            receiverAddress: receiverStreamings[i]
-                                .receiverAddress,
-                            frequency: receiverStreamings[i].frequency,
-                            amount: receiverStreamings[i].amount,
-                            startingDate: uint64(addTillDate),
-                            endingDate: receiverStreamings[i].endingDate
-                        })
-                    );
-                }
-            }
+        if (quantityToPay > 0) {
+            _incomingFlows[streaming.receiverAddress].totalPreviousValueTransfered += quantityToPay;
+            _outgoingFlows[streaming.senderAddress].totalPreviousValueTransfered += quantityToPay;
         }
 
-        HelperLibrary.Streaming[] storage senderStreamings =
-            _streamingsFromSender[_tokenHolder];
-        for (uint256 i = 0; i < senderStreamings.length; i++) {
-            // this must be true always
-            assert(
-                senderStreamings[i].startingDate <
-                    senderStreamings[i].endingDate
-            );
-            if (block.timestamp > senderStreamings[i].startingDate) {
-                uint256 removeTillDate =
-                    senderStreamings[i].endingDate < block.timestamp
-                        ? senderStreamings[i].endingDate
-                        : block.timestamp;
-                uint256 intervalTranscursed =
-                    removeTillDate - senderStreamings[i].startingDate;
-
-                uint256 quantityChanged =
-                    ((senderStreamings[i].amount * intervalTranscursed) /
-                        senderStreamings[i].frequency);
-
-                // update the balances (expensive operation)
-                _balances[_tokenHolder] -= quantityChanged;
-                _balances[
-                    senderStreamings[i].receiverAddress
-                ] += quantityChanged;
-
-                // update stream
-                if (removeTillDate >= senderStreamings[i].endingDate) {
-                    // remove the stream because is already finished
-                    _stopStreaming(
-                        _tokenHolder,
-                        senderStreamings[i].senderAddress
-                    );
-                } else {
-                    _updateStreaming(
-                        HelperLibrary.Streaming({
-                            stype: senderStreamings[i].stype,
-                            senderAddress: senderStreamings[i].senderAddress,
-                            receiverAddress: senderStreamings[i]
-                                .receiverAddress,
-                            frequency: senderStreamings[i].frequency,
-                            amount: senderStreamings[i].amount,
-                            startingDate: uint64(removeTillDate),
-                            endingDate: senderStreamings[i].endingDate
-                        })
-                    );
-                }
-            }
+        // make the transfers (the payment and the return)
+        if (quantityToPay > 0) {
+            _streamingManager.transfer(streaming.receiverAddress, quantityToPay);
         }
+        if (quantityToReturn > 0) {
+            _streamingManager.transfer(streaming.receiverAddress, quantityToReturn);
+        }
+
+        emit StreamingStopped(streaming.senderAddress, streaming.receiverAddress);
     }
 
-    function _updateStreaming(HelperLibrary.Streaming memory _streaming)
-        internal
-    {
-        // Update the HelperLibrary.Streaming from both variables (more gas in storage but less in consulting)
-
-        // Use storage for less gas in readonly
-        HelperLibrary.Streaming[] storage senderStreamings =
-            _streamingsFromSender[_streaming.senderAddress];
-        for (uint256 i = 0; i < senderStreamings.length; i++) {
-            if (
-                senderStreamings[i].receiverAddress ==
-                _streaming.receiverAddress
-            ) {
-                senderStreamings[i].stype = _streaming.stype;
-                senderStreamings[i].amount = _streaming.amount;
-                senderStreamings[i].frequency = uint64(_streaming.frequency);
-                senderStreamings[i].startingDate = uint64(
-                    _streaming.startingDate
-                );
-                senderStreamings[i].endingDate = uint64(_streaming.endingDate);
-                break;
-            }
-        }
-
-        HelperLibrary.Streaming[] storage receiverStreamings =
-            _streamingsToReceiver[_streaming.receiverAddress];
-        for (uint256 i = 0; i < receiverStreamings.length; i++) {
-            if (
-                receiverStreamings[i].senderAddress == _streaming.senderAddress
-            ) {
-                receiverStreamings[i].stype = _streaming.stype;
-                receiverStreamings[i].amount = _streaming.amount;
-                receiverStreamings[i].frequency = uint64(_streaming.frequency);
-                receiverStreamings[i].startingDate = uint64(
-                    _streaming.startingDate
-                );
-                receiverStreamings[i].endingDate = uint64(
-                    _streaming.endingDate
-                );
-                break;
-            }
-        }
-    }
-
-    function _stopStreaming(address _fromAddress, address _toAddress) internal {
-        // Delete the HelperLibrary.Streaming from both variables (more gas in storage but less in consulting)
-
-        // Use storage for less gas in readonly
-        HelperLibrary.Streaming[] storage senderStreamings =
-            _streamingsFromSender[_fromAddress];
-        for (uint256 i = 0; i < senderStreamings.length; i++) {
-            if (senderStreamings[i].receiverAddress == _toAddress) {
-                // Remove by moving last element to position (order doesn't matter)
-                if (i != senderStreamings.length - 1) {
-                    senderStreamings[i] = senderStreamings[
-                        senderStreamings.length - 1
-                    ];
-                }
-                senderStreamings.pop();
-                break;
-            }
-        }
-
-        HelperLibrary.Streaming[] storage receiverStreamings =
-            _streamingsToReceiver[_toAddress];
-        for (uint256 i = 0; i < receiverStreamings.length; i++) {
-            if (receiverStreamings[i].senderAddress == _fromAddress) {
-                // Remove by moving last element to position (order doesn't matter)
-                if (i != receiverStreamings.length - 1) {
-                    receiverStreamings[i] = receiverStreamings[
-                        receiverStreamings.length - 1
-                    ];
-                }
-                receiverStreamings.pop();
-                break;
-            }
-        }
-    }
-
-    // adding the streaming shares calculation through this hook
     function _beforeTokenTransfer(
         address from,
-        address to,
+        address,
         uint256 amount
-    ) internal virtual override {
-        // Update the balance before sending
-        updateBalanceWithStreamings(from);
-        super._beforeTokenTransfer(from, to, amount);
+    ) internal view virtual override {
+        // address 0 is minting
+        if (from != address(0) && super.balanceOf(from) < amount) {
+            revert("Real balance (wihtout streamings) not enough to transfer");
+        }
     }
 }
