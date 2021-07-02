@@ -3,6 +3,9 @@ pragma solidity ^0.8.0;
 
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 
+/// @title Streaming manager
+/// @author Eric Nordelo
+/// @notice Arbitrage between the streaming sender and receivers (manage the payments)
 contract StreamingManager {
     address public immutable erc20StreamableAddress;
 
