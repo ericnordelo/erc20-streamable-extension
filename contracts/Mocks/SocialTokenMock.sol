@@ -2,16 +2,21 @@
 pragma solidity ^0.8.0;
 
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
 import "../ERC20Streamable.sol";
 
-contract SocialTokenMock is ERC20, ERC20Streamable {
-    constructor(uint256 initialSupply) ERC20("PriviTestToken", "PTT") {
+contract SocialTokenMock is ERC20, ERC20Streamable, Ownable {
+    constructor(
+        uint256 initialSupply,
+        string memory tokenName,
+        string memory tokenSymbol
+    ) ERC20(tokenName, tokenSymbol) {
         // default decimals: 18
         _mint(msg.sender, initialSupply * 10**decimals());
     }
 
     // allow to increment the totalSupply by minting
-    function mint(address to, uint256 amount) external {
+    function mint(address to, uint256 amount) external onlyOwner {
         _mint(to, amount);
     }
 

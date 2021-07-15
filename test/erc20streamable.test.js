@@ -80,10 +80,7 @@ contract('SocialTokenMock', function (accounts) {
       let new_streaming = { ...streaming };
       new_streaming.senderAddress = accounts[0];
       await social_token.createStreaming(new_streaming, { from: accounts[0] });
-      await expectRevert(
-        social_token.createStreaming(new_streaming, { from: accounts[0] }),
-        "Can't open two streams to same address"
-      );
+      await expectRevert(social_token.createStreaming(new_streaming, { from: accounts[0] }), 'Existing streaming');
     });
 
     it("can't create streaming without enough balance", async () => {

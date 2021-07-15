@@ -8,8 +8,10 @@ import "./StreamingLibrary.sol";
 import "./StreamingManager.sol";
 import "./Structs.sol";
 
-/// @title Streaming extension for an ERC20 token
-/// @author Eric Nordelo
+/**
+ * @title Streaming extension for an ERC20 token
+ * @author Eric Nordelo
+ **/
 abstract contract ERC20Streamable is ERC20, AccessControl {
     using Counters for Counters.Counter;
     using StreamingLibrary for Streaming;
@@ -19,7 +21,6 @@ abstract contract ERC20Streamable is ERC20, AccessControl {
     bytes32 public constant ADMIN = keccak256("admin");
 
     address public streamingManagerAddress;
-    StreamingManager private _streamingManager;
 
     mapping(address => mapping(address => bool)) private _openStreamings;
     mapping(uint256 => Streaming) private _streamings;
@@ -36,11 +37,12 @@ abstract contract ERC20Streamable is ERC20, AccessControl {
         _setupRole(ADMIN, msg.sender);
     }
 
-    /// @notice Allows admins to set the Streaming Manager contract address
-    /// @param _streamingManagerAddress The address of the contract
+    /**
+     * @notice Allows admins to set the Streaming Manager contract address
+     * @param _streamingManagerAddress The address of the contract
+     **/
     function setStreamingManagerAddress(address _streamingManagerAddress) external onlyRole(ADMIN) {
         streamingManagerAddress = _streamingManagerAddress;
-        _streamingManager = StreamingManager(_streamingManagerAddress);
     }
 
     modifier isValidStreaming(Streaming memory _streaming) {
@@ -54,23 +56,18 @@ abstract contract ERC20Streamable is ERC20, AccessControl {
         _;
     }
 
-    function checkOnlySenderOrAdmin(address _sender) internal view {
-        require(_sender == msg.sender || hasRole(ADMIN, msg.sender), "Permission denied");
-    }
-
-    /// @notice Create a streaming between to addresses
-    /// @param _streaming The data of the streaming
-    /// @return newStreamingId The id of the new streaming
+    /**
+     * @notice Create a streaming between to addresses
+     * @param _streaming The data of the streaming
+     * @return newStreamingId The id of the new streaming
+     **/
     function createStreaming(Streaming memory _streaming)
         public
         isValidStreaming(_streaming)
         returns (uint256 newStreamingId)
     {
         require(block.timestamp < _streaming.endingDate, "Invalid ending date");
-        require(
-            !_openStreamings[_streaming.senderAddress][_streaming.receiverAddress],
-            "Can't open two streams to same address"
-        );
+        require(!_openStreamings[_streaming.senderAddress][_streaming.receiverAddress], "Existing streaming");
         _streaming.startingDate = uint64(block.timestamp);
 
         uint256 totalAmount = _streaming.amountPerSecond * (_streaming.endingDate - _streaming.startingDate);
@@ -89,6 +86,10 @@ abstract contract ERC20Streamable is ERC20, AccessControl {
 
         // transfer the total amount to the manager
         transfer(streamingManagerAddress, totalAmount);
+        StreamingManager(streamingManagerAddress).incrementHoldingBalance(
+            _streaming.senderAddress,
+            totalAmount
+        );
 
         emit StreamingCreated(
             _streaming.senderAddress,
@@ -98,9 +99,11 @@ abstract contract ERC20Streamable is ERC20, AccessControl {
         );
     }
 
-    /// @notice Update a streaming between to addresses
-    /// @param _streamingId The id of the streaming to update
-    /// @param _streamingUpdateRequest The data of the streaming update
+    /**
+     * @notice Update a streaming between to addresses
+     * @param _streamingId The id of the streaming to update
+     * @param _streamingUpdateRequest The data of the streaming update
+     */
     function updateStreaming(uint256 _streamingId, StreamingUpdateRequest calldata _streamingUpdateRequest)
         external
     {
@@ -129,13 +132,25 @@ abstract contract ERC20Streamable is ERC20, AccessControl {
 
             // make the transfers (the payment and the return)
             if (quantityToPayToReceiver > 0) {
-                _streamingManager.transfer(streaming.receiverAddress, quantityToPayToReceiver);
+                StreamingManager(streamingManagerAddress).transferAndUpdateHoldingBalance(
+                    streaming.senderAddress,
+                    streaming.receiverAddress,
+                    quantityToPayToReceiver
+                );
             }
             // update streaming manager balance
             if (currentHolding > expectedHolding) {
-                _streamingManager.transfer(streaming.senderAddress, currentHolding - expectedHolding);
+                StreamingManager(streamingManagerAddress).transferAndUpdateHoldingBalance(
+                    streaming.senderAddress,
+                    streaming.senderAddress,
+                    currentHolding - expectedHolding
+                );
             } else if (currentHolding < expectedHolding) {
                 transfer(streamingManagerAddress, expectedHolding - currentHolding);
+                StreamingManager(streamingManagerAddress).incrementHoldingBalance(
+                    streaming.senderAddress,
+                    expectedHolding - currentHolding
+                );
             }
 
             emit StreamingUpdated(
@@ -147,41 +162,43 @@ abstract contract ERC20Streamable is ERC20, AccessControl {
         }
     }
 
-    /// @notice Stop a streaming between to addresses
-    /// @dev Protected against reentracy by check-effect-interactions pattern
-    /// @param _streamingId The id of the streaming to stop
+    /**
+     * @notice Stop a streaming between to addresses
+     * @dev Protected against reentracy by check-effect-interactions pattern
+     * @param _streamingId The id of the streaming to stop
+     */
     function stopStreaming(uint256 _streamingId) public {
         Streaming memory streaming = getStreaming(_streamingId);
 
-        checkOnlySenderOrAdmin(streaming.senderAddress);
+        // check only sender or admin
+        require(streaming.senderAddress == msg.sender || hasRole(ADMIN, msg.sender), "Permission denied");
 
         _stop(streaming, _streamingId);
     }
 
-    /// @notice Getter for a streaming
-    /// @param _streamingId The id of the streaming
-    /// @return streaming The data of the streaming
+    /**
+     * @notice Getter for a streaming
+     * @param _streamingId The id of the streaming
+     * @return streaming The data of the streaming
+     */
     function getStreaming(uint256 _streamingId) public view returns (Streaming memory streaming) {
         streaming = _streamings[_streamingId];
         require(streaming.amountPerSecond > 0, "Unexisting streaming");
     }
 
-    /// @notice Returns the balance of an account with the streaming info
-    /// @param account The address of the account to check
-    /// @return The current balance with streamings
+    /**
+     * @notice Returns the balance of an account with the streaming info
+     * @param account The address of the account to check
+     * @return The current balance with streamings
+     */
     function balanceOf(address account) public view virtual override returns (uint256) {
-        uint256 notYetPaidIncomingFlow = _incomingFlows[account].totalPreviousValueGenerated -
-            _incomingFlows[account].totalPreviousValueTransfered;
-        notYetPaidIncomingFlow +=
-            (block.timestamp - _incomingFlows[account].flow.startingDate) *
-            _incomingFlows[account].flow.amountPerSecond;
-        uint256 notYetPaidOutgoingFlow = _outgoingFlows[account].totalPreviousValueGenerated -
-            _outgoingFlows[account].totalPreviousValueTransfered;
-        notYetPaidOutgoingFlow +=
-            (block.timestamp - _outgoingFlows[account].flow.startingDate) *
-            _outgoingFlows[account].flow.amountPerSecond;
+        (uint256 notYetPaidIncomingFlow, uint256 notYetPaidOutgoingFlow) = StreamingLibrary
+        .getNotYetPaidFlowsValue(account, _incomingFlows, _outgoingFlows);
 
-        return super.balanceOf(account) + notYetPaidIncomingFlow - notYetPaidOutgoingFlow;
+        // this is the sender balance holded in the streaming manager
+        uint256 balanceHolded = StreamingManager(streamingManagerAddress).getHoldingBalance(account);
+
+        return super.balanceOf(account) + notYetPaidIncomingFlow - notYetPaidOutgoingFlow + balanceHolded;
     }
 
     function _stop(Streaming memory streaming, uint256 _streamingId) internal {
@@ -200,10 +217,18 @@ abstract contract ERC20Streamable is ERC20, AccessControl {
 
         // make the transfers (the payment and the return)
         if (quantityToPay > 0) {
-            _streamingManager.transfer(streaming.receiverAddress, quantityToPay);
+            StreamingManager(streamingManagerAddress).transferAndUpdateHoldingBalance(
+                streaming.senderAddress,
+                streaming.receiverAddress,
+                quantityToPay
+            );
         }
         if (quantityToReturn > 0) {
-            _streamingManager.transfer(streaming.receiverAddress, quantityToReturn);
+            StreamingManager(streamingManagerAddress).transferAndUpdateHoldingBalance(
+                streaming.senderAddress,
+                streaming.senderAddress,
+                quantityToReturn
+            );
         }
 
         emit StreamingStopped(streaming.senderAddress, streaming.receiverAddress);

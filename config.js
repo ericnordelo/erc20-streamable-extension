@@ -1,7 +1,7 @@
 const settings = {
   development: {
-    tokenName: 'PriviTestToken',
-    tokenSymbol: 'PTT',
+    tokenName: 'pUSDT',
+    tokenSymbol: 'pUSDT',
     decimals: 18,
   },
 };

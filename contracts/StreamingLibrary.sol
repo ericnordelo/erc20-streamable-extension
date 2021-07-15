@@ -5,13 +5,17 @@ import "./ERC20Streamable.sol";
 import "./StreamingManager.sol";
 import "./Structs.sol";
 
-/// @title Library for streamings
-/// @author Eric Nordelo
+/**
+ * @title Library for streamings
+ * @author Eric Nordelo
+ */
 library StreamingLibrary {
-    /// @notice Helper for streaming creation
-    /// @param _streaming The streaming being created
-    /// @param _incomingFlows The incoming flows mapping
-    /// @param _outgoingFlows The outgoing flows mapping
+    /**
+     * @notice Helper for streaming creation
+     * @param _streaming The streaming being created
+     * @param _incomingFlows The incoming flows mapping
+     * @param _outgoingFlows The outgoing flows mapping
+     */
     function createStreaming(
         Streaming memory _streaming,
         mapping(address => FlowInfo) storage _incomingFlows,
@@ -45,16 +49,18 @@ library StreamingLibrary {
         }
     }
 
-    /// @notice Helper for streaming updating
-    /// @param streaming The streaming being updated
-    /// @param _streamingId The id of the streaming
-    /// @param _incomingFlows The incoming flows mapping
-    /// @param _outgoingFlows The outgoing flows mapping
-    /// @param _streamings The streamings mapping
-    /// @param _streamingUpdateRequest The data for the update
-    /// @return quantityToPayToReceiver
-    /// @return currentHolding
-    /// @return expectedHolding
+    /**
+     * @notice Helper for streaming updating
+     * @param streaming The streaming being updated
+     * @param _streamingId The id of the streaming
+     * @param _incomingFlows The incoming flows mapping
+     * @param _outgoingFlows The outgoing flows mapping
+     * @param _streamings The streamings mapping
+     * @param _streamingUpdateRequest The data for the update
+     * @return quantityToPayToReceiver
+     * @return currentHolding
+     * @return expectedHolding
+     */
     function updateStreaming(
         Streaming memory streaming,
         uint256 _streamingId,
@@ -121,15 +127,18 @@ library StreamingLibrary {
         _streamings[_streamingId].endingDate = _streamingUpdateRequest.endingDate;
     }
 
-    /// @notice Helper for streaming stopping
-    /// @param streaming The streaming being stopped
-    /// @param _streamingId The id of the streaming
-    /// @param _incomingFlows The incoming flows mapping
-    /// @param _outgoingFlows The outgoing flows mapping
-    /// @param _streamings The streamings mapping
-    /// @param _openStreamings The open streamings mapping
-    /// @return quantityToPay
-    /// @return quantityToReturn
+    /**
+     * @notice Helper for streaming stopping
+     * @param streaming The streaming being stopped
+     * @param _streamingId The id of the streaming
+     * @param _incomingFlows The incoming flows mapping
+     * @param _outgoingFlows The outgoing flows mapping
+     * @param _streamings The streamings mapping
+     * @param _openStreamings The open streamings mapping
+     * @return quantityToPay
+     * @return quantityToReturn
+     */
+
     function stopStreaming(
         Streaming memory streaming,
         uint256 _streamingId,
@@ -178,5 +187,24 @@ library StreamingLibrary {
             _incomingFlows[streaming.receiverAddress].totalPreviousValueTransfered += quantityToPay;
             _outgoingFlows[streaming.senderAddress].totalPreviousValueTransfered += quantityToPay;
         }
+    }
+
+    function getNotYetPaidFlowsValue(
+        address account,
+        mapping(address => FlowInfo) storage _incomingFlows,
+        mapping(address => FlowInfo) storage _outgoingFlows
+    ) external view returns (uint256 notYetPaidIncomingFlow, uint256 notYetPaidOutgoingFlow) {
+        notYetPaidIncomingFlow =
+            _incomingFlows[account].totalPreviousValueGenerated -
+            _incomingFlows[account].totalPreviousValueTransfered;
+        notYetPaidIncomingFlow +=
+            (block.timestamp - _incomingFlows[account].flow.startingDate) *
+            _incomingFlows[account].flow.amountPerSecond;
+        notYetPaidOutgoingFlow =
+            _outgoingFlows[account].totalPreviousValueGenerated -
+            _outgoingFlows[account].totalPreviousValueTransfered;
+        notYetPaidOutgoingFlow +=
+            (block.timestamp - _outgoingFlows[account].flow.startingDate) *
+            _outgoingFlows[account].flow.amountPerSecond;
     }
 }

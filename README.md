@@ -16,8 +16,7 @@ A flow between to addresses is a directed relationship which summarizes the stre
 
 ## Addresses of deployed contract on mumbai network
 
-`pDAI`: 0x055DF778d99e147657CeA05254deF1fdBee04A95  
-`pUSDT`: 0x6cbC0a9d98a573e0dbF8315eE3038A4454eca031
+_TODO: Add mainnet smart contract addresses_
 ​
 
 ## Addresses of deployed contract on mainnet
@@ -38,7 +37,7 @@ _TODO: Add mainnet smart contract addresses_
 
 ```
 $ git clone ...
-$ cd erc20-streamable-extension/
+$ cd Privi-Polygon/privi-streaming
 ```
 
 2. Then install the node modules.
@@ -53,6 +52,7 @@ $ npm install
 MNEMONIC=[the 12 mnemonic words]
 INFURA_API_KEY=[your API key]
 ETHER_SCAN_API_KEY=[your API key]
+POLYGONSCAN_API_KEY=[your API key]
 ```
 
 ​
