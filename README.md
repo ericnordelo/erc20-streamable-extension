@@ -1,4 +1,4 @@
-# Privi ERC20 Streaming extension
+# ERC20 Streaming extension
 
 ## Overview
 
