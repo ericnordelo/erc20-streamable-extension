@@ -37,7 +37,7 @@ _TODO: Add mainnet smart contract addresses_
 
 ```
 $ git clone ...
-$ cd Privi-Polygon/privi-streaming
+$ cd erc20-streamable-extension/
 ```
 
 2. Then install the node modules.
